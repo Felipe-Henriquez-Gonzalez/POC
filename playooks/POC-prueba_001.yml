@@ -1,0 +1,109 @@
+---
+- name: Control de servicio mitch-fix
+  hosts: byydasbue701.cajval.sba.com.ar
+    #remote_user: jenkins-linux
+  become: yes
+    #become_user: appusr
+
+  vars:
+    #app_dir: /caja/usr/mitch-fix-od/latest_mitch-fix
+    #log_dir: /caja/var/mitch-fix-od/logs
+    app_dir: /tmp/prueba/app
+    log_dir: /tmp/prueba/logs
+    pid_file: "{{ app_dir }}/fpid"
+
+  tasks:
+
+    - name: Verificar si el archivo fpid existe
+      stat:
+        path: "{{ pid_file }}"
+      register: fpid_status
+
+    - name: Obtener el PID 
+      command: cat "{{ pid_file }}"
+      register: pid_output
+      when: fpid_status.stat.exists
+      changed_when: false
+
+    - name: Validar si proceso está corriendo
+      shell: "ps -fp {{ pid_output.stdout }}"
+      register: ps_check
+      when: pid_output.stdout
+      ignore_errors: yes
+      failed_when: false
+      changed_when: false
+
+    - name: Mostrar proceso
+      debug:
+        msg: "{{ ps_check.stdout }}"
+      when: fpid_status.stat.exists
+
+    - name: Subir proceso
+      shell: "./start.sh"
+      args:
+        chdir: "{{ app_dir }}"
+      when: estado == "subir" 
+
+    - name: Bajar proceso
+      shell: "./stop.sh"
+      args:
+        chdir: "{{ app_dir }}"
+      when: estado == "bajar" 
+
+    - name: Resetear proceso
+      shell: "./reset.sh"
+      args:
+        chdir: "{{ app_dir }}"
+      when: estado == "reset" 
+
+    - name: Depurar logs
+      block:
+        - name: Limpiar mitch-fix.log y mitch-fix.mon
+          shell: "cat /dev/null > {{ item }}"
+          loop:
+            - "{{ log_dir }}/cvfix-mitch.log"
+            - "{{ log_dir }}/core-statistics.log"
+
+        - name: Encontrar archivos que coincidan con los patrones
+          ansible.builtin.find:
+            paths: "{{ log_dir }}"
+            patterns: "cvfix-mitch.log.2*,core-statistics.log.2*"
+            file_type: file
+          register: depurar
+
+        - name: Listar archivos a depurar
+          debug:
+             msg: "{{ depurar.files | map(attribute='path') | map('basename') | list }}"
+
+
+        - name: Borrar archivos encontrados
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+          loop: "{{ depurar.files }}"
+      when: estado == "depurolog"
+
+    - name: Depurar aplicacion (eliminar app)
+      block:
+        - name: Buscar archivos a depurar en "{{ app_dir }}"
+          ansible.builtin.find:
+            paths: "{{ app_dir }}"
+            file_type: file
+          register: depurar
+
+        - name: Borrar archivos encontrados
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+          loop: "{{ depurar.files }}"
+      when: estado == "depuroappl"
+
+
+#variables a cargar en Encuesta
+#estado=subir
+#estado=bajar
+#estado=reset
+#estado=verlog
+#estado=depurolog
+#estado=depuroappl
+
